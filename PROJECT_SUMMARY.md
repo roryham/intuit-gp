@@ -2,7 +2,7 @@
 
 ## QuickBooks Deposit Matching Application
 
-A Google Apps Script application that matches CSV deposit data from Google Sheets with QuickBooks Online sales receipts and automatically creates bank deposits in QuickBooks.
+A Google Apps Script application that matches CSV deposit data from Google Sheets with QuickBooks Online sales receipts and refund receipts, then automatically creates bank deposits in QuickBooks.
 
 ---
 
@@ -236,32 +236,37 @@ A Google Apps Script application that matches CSV deposit data from Google Sheet
    GET /v3/company/{realmId}/query?query=SELECT * FROM SalesReceipt WHERE...
    ```
 
-2. **Read Sales Receipt**
+2. **Query Refund Receipts**
+   ```
+   GET /v3/company/{realmId}/query?query=SELECT * FROM RefundReceipt WHERE...
+   ```
+
+3. **Read Sales Receipt**
    ```
    GET /v3/company/{realmId}/salesreceipt/{id}
    ```
 
-3. **Query Customers** (for caching)
+4. **Query Customers** (for caching)
    ```
    GET /v3/company/{realmId}/query?query=SELECT * FROM Customer MAXRESULTS 1000
    ```
 
-4. **Read Customer**
+5. **Read Customer**
    ```
    GET /v3/company/{realmId}/customer/{id}
    ```
 
-5. **Query Bank Accounts** (for deposit account selection)
+6. **Query Bank Accounts** (for deposit account selection)
    ```
    GET /v3/company/{realmId}/query?query=SELECT * FROM Account WHERE AccountType = 'Bank'...
    ```
 
-6. **Create Deposit**
+7. **Create Deposit**
    ```
    POST /v3/company/{realmId}/deposit
    ```
 
-7. **Get Company Info** (for testing)
+8. **Get Company Info** (for testing)
    ```
    GET /v3/company/{realmId}/companyinfo/{realmId}
    ```
@@ -572,23 +577,35 @@ This project is provided as-is for internal business use.
 
 ## Version History
 
-### v1.1 (Phase 2 Testing Complete - 2026-02-03)
-- Added deposit account selection (Bank type accounts)
-- Added custom deposit date selection
-- Added deposit memo/reference field (PrivateNote)
-- Fixed deposit creation structure (LinkedTxn with TxnLineId)
-- Added manual redirect URI configuration
-- Added debug tools (sales receipts, accounts, deposit tests)
-- Completed sandbox testing with successful deposit creation
-- Enhanced documentation with troubleshooting for common issues
+### v1.2 (Phase 4 Production Preparation - 2026-02-04)
+- Published app to Production environment
+- Fixed environment detection bug in Config.gs (getBaseUrl, getEnvironmentName now read from stored properties)
+- Successfully connected to Production QuickBooks (Realm ID: 9130355485784946)
+- Ready for production data testing (read-only)
 
-### v1.0 (Initial Release - 2026-02-02)
+### v1.1 (Phase 3 Sandbox Validation Complete - 2026-02-04)
+- **Added RefundReceipt support** (query, match, create deposits)
+- Added "QB Transaction Type" column (SalesReceipt or RefundReceipt)
+- Fixed CSV parser to accept negative amounts (removed `amount <= 0` check)
+- Updated amountsMatch() to handle positive/negative comparisons
+- Added extensive logging for debugging matches
+- Tested deposits with mixed sales receipts and refund receipts
+- All edge cases validated (no match, amount mismatch, email mismatch, special characters)
+- Error handling validated (missing data, expired tokens)
+- End-to-end workflow confirmed working
+
+### v1.0 (Initial Release - 2026-02-02 to 2026-02-03)
 - OAuth 2.0 integration (Sandbox + Production)
-- CSV deposit matching
+- CSV deposit matching with sales receipts
 - QuickBooks sales receipt queries
 - Customer data caching
-- Visual color coding
-- Deposit creation
+- Visual color coding (GREEN/YELLOW/RED)
+- Deposit creation with LinkedTxn
+- Deposit account selection (Bank type accounts)
+- Custom deposit date selection
+- Deposit memo/reference field (PrivateNote)
+- Manual redirect URI configuration
+- Debug tools (sales receipts, accounts, deposit tests)
 - Complete documentation
 
 ---

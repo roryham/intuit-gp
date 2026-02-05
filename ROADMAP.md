@@ -178,23 +178,26 @@ This roadmap tracks your progress through setup, testing, and deployment.
 
 ---
 
-## Phase 4: Production Preparation ⬜ NOT STARTED
+## Phase 4: Production Preparation ⏳ IN PROGRESS
 
-### 4.1 QuickBooks Production App Setup ⬜
-- [ ] Create Production QuickBooks app (or publish Sandbox app)
-- [ ] Get Production Client ID
-- [ ] Get Production Client Secret
-- [ ] Add same redirect URI to Production app
-- [ ] Save Production app settings
+### 4.1 QuickBooks Production App Setup ✅
+- [x] Published Sandbox app to Production
+- [x] Got Production Client ID
+- [x] Got Production Client Secret
+- [x] Added redirect URI to Production app (Launch URL, Disconnect URL, Redirect URI)
+- [x] Configured host domain and IP settings
+- [x] Production app settings saved
 
-### 4.2 Switch to Production Environment ⬜
-- [ ] In Google Sheet: QuickBooks → Setup → Switch Environment
-- [ ] Confirm switch to PRODUCTION
-- [ ] Configure Production OAuth credentials
-- [ ] Authorize with REAL QuickBooks account
-- [ ] Test connection to production
+### 4.2 Switch to Production Environment ✅
+- [x] In Google Sheet: QuickBooks → Setup → Switch Environment
+- [x] Confirmed switch to PRODUCTION
+- [x] Configured Production OAuth credentials
+- [x] Authorized with REAL QuickBooks account (Realm ID: 9130355485784946)
+- [x] Fixed environment detection bug in Config.gs (getBaseUrl, getEnvironmentName)
+- [x] Test connection to production - SUCCESS!
 
-### 4.3 Production Testing with Limited Data ⬜
+### 4.3 Production Testing with Limited Data ⬜ READY TO START
+- [ ] Select deposit account for production
 - [ ] Select a small date range (1-2 days)
 - [ ] Export real transaction CSV for that range
 - [ ] Add to Google Sheet
@@ -211,7 +214,7 @@ This roadmap tracks your progress through setup, testing, and deployment.
 - [ ] Check for false negatives (missed matches)
 - [ ] Document match accuracy percentage
 
-**Phase 4 Status**: ⬜ **NOT STARTED**
+**Phase 4 Status**: ⏳ **IN PROGRESS** - Production environment configured and tested. Ready for limited data testing.
 
 ---
 
@@ -291,23 +294,26 @@ This roadmap tracks your progress through setup, testing, and deployment.
 
 **Last Updated**: 2026-02-04
 
-**Current Phase**: Phase 3 - Sandbox Validation ✅ COMPLETE
+**Current Phase**: Phase 4 - Production Preparation ⏳ IN PROGRESS
 
-**Next Action**: Ready for Phase 4 - Production Preparation
-- Create or publish Production QuickBooks app
-- Get Production credentials
-- Switch to Production environment
-- Test with limited real data
+**Next Action**: Phase 4.3 - Production Testing with Limited Data
+- Select deposit account for production
+- Select small date range (1-2 days)
+- Export real transaction CSV
+- Run matching with real data (READ-ONLY)
+- Review match accuracy
+- DO NOT create deposits yet
 
 **Blockers**: None
 
 **Notes**:
-- Successfully completed all sandbox validation tests
-- Refund receipt support fully implemented and tested
-- Edge cases handled gracefully
-- Error handling validated
-- End-to-end workflow confirmed working
-- Ready to move to production environment
+- ✅ Phase 3 complete: All sandbox validation tests passed
+- ✅ Phase 4.1 complete: Production app published and configured
+- ✅ Phase 4.2 complete: Switched to production, authorized successfully
+- ✅ Production connection tested (Realm ID: 9130355485784946)
+- ✅ Fixed environment detection bug in Config.gs
+- 🔄 Ready for limited real data testing (read-only matching)
+- ⚠️ Production deposits NOT enabled yet - testing only
 
 ---
 

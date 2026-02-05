@@ -57,7 +57,9 @@ const CONFIG = {
    * Get the current base URL based on environment setting
    */
   getBaseUrl: function() {
-    return this.ENVIRONMENT === 'SANDBOX'
+    // Read from stored properties, not hardcoded value
+    const env = getCurrentEnvironment();
+    return env === 'SANDBOX'
       ? this.SANDBOX_BASE_URL
       : this.PRODUCTION_BASE_URL;
   },
@@ -66,7 +68,9 @@ const CONFIG = {
    * Get environment display name
    */
   getEnvironmentName: function() {
-    return this.ENVIRONMENT === 'SANDBOX' ? '🧪 Sandbox' : '🏭 Production';
+    // Read from stored properties, not hardcoded value
+    const env = getCurrentEnvironment();
+    return env === 'SANDBOX' ? '🧪 Sandbox' : '🏭 Production';
   }
 };
 

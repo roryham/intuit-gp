@@ -1,25 +1,28 @@
 # QuickBooks Deposit Matching Application
 
-A Google Apps Script application that matches deposits from Google Sheets with QuickBooks Online sales receipts and creates bank deposits automatically.
+A Google Apps Script application that matches deposits from Google Sheets with QuickBooks Online sales receipts and refund receipts, then creates bank deposits automatically.
 
 ## Features
 
 - **OAuth 2.0 Integration**: Secure authentication with QuickBooks Online
 - **Sandbox & Production Support**: Test in sandbox before going live
 - **Intelligent Matching**: Matches deposits based on email address AND amount
+- **Sales Receipt & Refund Receipt Support**: Handles both positive and negative transactions
 - **Visual Feedback**: Color-coded rows (Green=Matched, Yellow=CSV Only, Red=QB Only)
-- **Automatic Deposit Creation**: Creates QuickBooks deposits from matched sales receipts
+- **Automatic Deposit Creation**: Creates QuickBooks deposits linking matched receipts
+- **Custom Deposit Date & Memo**: Specify deposit date and reference notes
 - **Performance Optimized**: Caches customer data to minimize API calls
+- **Robust Error Handling**: Gracefully handles missing data and expired tokens
 
 ## Overview
 
-This application helps reconcile credit card transactions (from CSV exports) with QuickBooks sales receipts by:
+This application helps reconcile credit card transactions (from CSV exports) with QuickBooks receipts by:
 
 1. Extracting customer emails from CSV Comment field
-2. Querying QuickBooks for sales receipts in the date range
-3. Matching based on email (case-insensitive) AND amount (±$0.01 tolerance)
+2. Querying QuickBooks for sales receipts AND refund receipts in the date range
+3. Matching based on email (case-insensitive) AND amount (±$0.01 tolerance, supports negative amounts)
 4. Color-coding matched vs unmatched rows
-5. Creating QuickBooks bank deposits for matched transactions
+5. Creating QuickBooks bank deposits for matched transactions (with custom dates and memos)
 
 ## Installation
 
@@ -127,15 +130,17 @@ To switch from Sandbox to Production (or vice versa):
    - Comparison is case-insensitive
    - Email format: `"Customer Name email@domain.com"` → Extracts: `email@domain.com`
 
-2. **Amount Match**: CSV Amount must match QuickBooks SalesReceipt TotalAmt
+2. **Amount Match**: CSV Amount must match QuickBooks Receipt TotalAmt
    - Tolerance: ±$0.01 (handles floating point precision)
    - CSV format: `"$189.10"` → Parsed: `189.10`
+   - Supports negative amounts for refunds: `"-$5400.00"` → Parsed: `-5400.00`
+   - Matches both positive (sales receipts) and negative (refund receipts)
 
 ### Customer Email Resolution
 
 The app fetches customer emails from QuickBooks by:
 1. Caching all customers at startup (1 API call instead of N calls)
-2. Looking up customer email from the SalesReceipt's CustomerRef
+2. Looking up customer email from the receipt's CustomerRef (works for both SalesReceipt and RefundReceipt)
 3. Using the customer's PrimaryEmailAddr or Email field
 
 ## CSV File Format
@@ -155,9 +160,10 @@ The app fetches customer emails from QuickBooks by:
 
 The app adds these columns to your sheet:
 
-- **QB Sales Receipt ID**: QuickBooks receipt ID
+- **QB Transaction ID**: QuickBooks receipt ID
+- **QB Transaction Type**: Either "SalesReceipt" or "RefundReceipt"
 - **QB Transaction Date**: Transaction date from QuickBooks
-- **QB Total Amount**: Amount from QuickBooks
+- **QB Total Amount**: Amount from QuickBooks (can be negative for refunds)
 - **QB Customer Email**: Customer email from QuickBooks
 - **QB Customer Name**: Customer name from QuickBooks
 - **Match Status**: Match result (✓ Matched, ⚠ In CSV only, ⚠ In QB only)
