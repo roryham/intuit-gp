@@ -15,13 +15,19 @@ function updateSheetWithMatchResults(sheet, matchResults) {
   const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
 
   const colIndices = {
-    qbId: headers.indexOf('QB Sales Receipt ID'),
+    qbId: headers.indexOf('QB Transaction ID'),
+    qbType: headers.indexOf('QB Transaction Type'),
     qbDate: headers.indexOf('QB Transaction Date'),
     qbAmount: headers.indexOf('QB Total Amount'),
     qbEmail: headers.indexOf('QB Customer Email'),
     qbName: headers.indexOf('QB Customer Name'),
     status: headers.indexOf('Match Status')
   };
+
+  // Support legacy column name for backward compatibility
+  if (colIndices.qbId === -1) {
+    colIndices.qbId = headers.indexOf('QB Sales Receipt ID');
+  }
 
   // Update matched rows
   matchResults.matched.forEach(match => {
@@ -80,6 +86,12 @@ function updateRowWithMatchData(sheet, match, colIndices, matchType) {
   if (matchType === 'matched') {
     // Update QB data columns
     sheet.getRange(rowNum, colIndices.qbId + 1).setValue(match.qbData.id);
+
+    // Add transaction type if column exists
+    if (colIndices.qbType !== -1) {
+      sheet.getRange(rowNum, colIndices.qbType + 1).setValue(match.qbData.txnType);
+    }
+
     sheet.getRange(rowNum, colIndices.qbDate + 1).setValue(match.qbData.txnDate);
     sheet.getRange(rowNum, colIndices.qbAmount + 1).setValue(formatCurrency(match.qbData.totalAmt));
     sheet.getRange(rowNum, colIndices.qbEmail + 1).setValue(match.qbData.customerEmail);
@@ -115,6 +127,12 @@ function addQBOnlyRows(sheet, qbOnlyMatches, colIndices) {
 
     // Add QB data
     sheet.getRange(rowNum, colIndices.qbId + 1).setValue(qbData.id);
+
+    // Add transaction type if column exists
+    if (colIndices.qbType !== -1) {
+      sheet.getRange(rowNum, colIndices.qbType + 1).setValue(qbData.txnType);
+    }
+
     sheet.getRange(rowNum, colIndices.qbDate + 1).setValue(qbData.txnDate);
     sheet.getRange(rowNum, colIndices.qbAmount + 1).setValue(formatCurrency(qbData.totalAmt));
     sheet.getRange(rowNum, colIndices.qbEmail + 1).setValue(qbData.customerEmail);
@@ -196,12 +214,22 @@ function showDepositCreationDialog() {
       return sum + deposit.qbData.TotalAmt;
     }, 0);
 
+    // Count transaction types
+    const salesReceiptCount = matchedDeposits.filter(d => d.qbData.txnType === 'SalesReceipt').length;
+    const refundReceiptCount = matchedDeposits.filter(d => d.qbData.txnType === 'RefundReceipt').length;
+
     // Step 1: Confirm deposit creation
-    const message = `Create QuickBooks Deposit?\n\n` +
-      `Matched Receipts: ${matchedDeposits.length}\n` +
+    let message = `Create QuickBooks Deposit?\n\n` +
+      `Matched Receipts: ${matchedDeposits.length}`;
+
+    if (refundReceiptCount > 0) {
+      message += ` (${salesReceiptCount} sales, ${refundReceiptCount} refunds)`;
+    }
+
+    message += `\n` +
       `Total Amount: ${formatCurrency(totalAmount)}\n` +
       `Deposit To: ${accountName}\n\n` +
-      `This will create a deposit in QuickBooks linking these sales receipts.\n\n` +
+      `This will create a deposit in QuickBooks linking these receipts.\n\n` +
       `Continue?`;
 
     const confirmed = showConfirmation(message, 'Create Deposit');

@@ -44,7 +44,8 @@ const CONFIG = {
 
   // New columns to add for QB data
   NEW_COLUMNS: [
-    'QB Sales Receipt ID',
+    'QB Transaction ID',
+    'QB Transaction Type',
     'QB Transaction Date',
     'QB Total Amount',
     'QB Customer Email',

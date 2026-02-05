@@ -253,10 +253,18 @@ function extractEmail(text) {
 
 /**
  * Compare two amounts with tolerance
+ * For refunds, compares absolute values since QB refunds are negative but CSV may have positive
  */
 function amountsMatch(amount1, amount2, tolerance = CONFIG.AMOUNT_TOLERANCE) {
-  const diff = Math.abs(amount1 - amount2);
-  return diff <= tolerance;
+  // Direct comparison (handles normal sales receipts)
+  const directDiff = Math.abs(amount1 - amount2);
+  if (directDiff <= tolerance) {
+    return true;
+  }
+
+  // Absolute value comparison (handles refunds where one is negative, one is positive)
+  const absDiff = Math.abs(Math.abs(amount1) - Math.abs(amount2));
+  return absDiff <= tolerance;
 }
 
 /**

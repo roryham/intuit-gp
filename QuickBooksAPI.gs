@@ -96,6 +96,57 @@ function getAllSalesReceipts() {
 }
 
 /**
+ * Query refund receipts from QuickBooks
+ * @param {string} query - SQL-like query string
+ * @returns {Array} Array of refund receipts
+ */
+function queryRefundReceipts(query) {
+  const endpoint = `query?query=${encodeURIComponent(query)}`;
+  const response = makeQBApiRequest(endpoint, 'GET');
+
+  if (response.QueryResponse && response.QueryResponse.RefundReceipt) {
+    return response.QueryResponse.RefundReceipt;
+  }
+
+  return [];
+}
+
+/**
+ * Get refund receipts within a date range
+ * @param {Date} startDate - Start date
+ * @param {Date} endDate - End date
+ * @returns {Array} Array of refund receipts
+ */
+function getRefundReceiptsByDateRange(startDate, endDate) {
+  const startDateStr = formatDateForQuery(startDate);
+  const endDateStr = formatDateForQuery(endDate);
+
+  const query = `SELECT * FROM RefundReceipt WHERE TxnDate >= '${startDateStr}' AND TxnDate <= '${endDateStr}' MAXRESULTS 1000`;
+
+  logWithTimestamp(`Querying refund receipts from ${startDateStr} to ${endDateStr}`);
+  const refunds = queryRefundReceipts(query);
+
+  // Log details of each refund receipt
+  refunds.forEach(refund => {
+    Logger.log(`Refund Receipt Found: ID=${refund.Id}, Date=${refund.TxnDate}, Amount=${refund.TotalAmt}, Customer=${refund.CustomerRef ? refund.CustomerRef.name : 'N/A'}`);
+  });
+
+  return refunds;
+}
+
+/**
+ * Get all refund receipts (last 365 days by default)
+ * @returns {Array} Array of refund receipts
+ */
+function getAllRefundReceipts() {
+  const endDate = new Date();
+  const startDate = new Date();
+  startDate.setDate(startDate.getDate() - 365); // Last year
+
+  return getRefundReceiptsByDateRange(startDate, endDate);
+}
+
+/**
  * Read a specific sales receipt by ID
  * @param {string} salesReceiptId - Sales receipt ID
  * @returns {Object} Sales receipt object
@@ -177,8 +228,8 @@ function createDeposit(depositData) {
 }
 
 /**
- * Build deposit object from matched sales receipts
- * @param {Array} matchedReceipts - Array of matched sales receipt data
+ * Build deposit object from matched receipts (sales receipts or refund receipts)
+ * @param {Array} matchedReceipts - Array of matched receipt data
  * @param {string} depositToAccountRef - Account reference (e.g., "35" for Checking)
  * @param {Date} txnDate - Transaction date
  * @param {string} memo - Optional memo/note for the deposit
@@ -188,15 +239,18 @@ function buildDepositObject(matchedReceipts, depositToAccountRef, txnDate, memo)
   // Get deposit account name
   const depositAccountName = getDepositAccountName();
 
-  // Build lines with LinkedTxn (for sales receipts, we don't need AccountRef)
+  // Build lines with LinkedTxn (supports both SalesReceipt and RefundReceipt)
   const lines = matchedReceipts.map((receipt, index) => {
+    // Determine transaction type (default to SalesReceipt for backward compatibility)
+    const txnType = receipt.qbData.txnType || 'SalesReceipt';
+
     return {
       Amount: receipt.qbData.TotalAmt,
       LinkedTxn: [
         {
           TxnId: String(receipt.qbData.Id),
-          TxnType: 'SalesReceipt',
-          TxnLineId: '0'  // Line ID within the sales receipt
+          TxnType: txnType,  // Either 'SalesReceipt' or 'RefundReceipt'
+          TxnLineId: '0'  // Line ID within the transaction
         }
       ]
     };

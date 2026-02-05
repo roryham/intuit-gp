@@ -6,7 +6,7 @@
 
 /**
  * Main matching function
- * Matches deposits from Google Sheet with QuickBooks sales receipts
+ * Matches deposits from Google Sheet with QuickBooks receipts (sales receipts and refund receipts)
  */
 function matchDepositsWithSalesReceipts() {
   try {
@@ -40,21 +40,31 @@ function matchDepositsWithSalesReceipts() {
     // Cache all customers first (optimization)
     const customerCache = getAllCustomers();
 
-    // Get sales receipts in date range
+    // Get both sales receipts and refund receipts in date range
     const salesReceipts = getSalesReceiptsByDateRange(dateRange.start, dateRange.end);
     logWithTimestamp(`Fetched ${salesReceipts.length} sales receipts from QuickBooks`);
 
-    if (salesReceipts.length === 0) {
-      showAlert('No sales receipts found in QuickBooks for this date range.');
+    const refundReceipts = getRefundReceiptsByDateRange(dateRange.start, dateRange.end);
+    logWithTimestamp(`Fetched ${refundReceipts.length} refund receipts from QuickBooks`);
+
+    const totalReceipts = salesReceipts.length + refundReceipts.length;
+
+    if (totalReceipts === 0) {
+      showAlert('No sales receipts or refund receipts found in QuickBooks for this date range.');
       return;
     }
 
-    // Enrich sales receipts with customer data
-    const enrichedReceipts = enrichSalesReceiptsWithCustomerData(salesReceipts, customerCache);
+    // Enrich both types with customer data
+    const enrichedSalesReceipts = enrichReceiptsWithCustomerData(salesReceipts, customerCache, 'SalesReceipt');
+    const enrichedRefundReceipts = enrichReceiptsWithCustomerData(refundReceipts, customerCache, 'RefundReceipt');
+
+    // Combine all receipts for matching
+    const allEnrichedReceipts = [...enrichedSalesReceipts, ...enrichedRefundReceipts];
+    logWithTimestamp(`Total enriched receipts: ${allEnrichedReceipts.length} (${enrichedSalesReceipts.length} sales, ${enrichedRefundReceipts.length} refunds)`);
 
     // Perform matching
-    showToast('Matching deposits with sales receipts...', 'QuickBooks Matching');
-    const matchResults = performMatching(csvDeposits, enrichedReceipts);
+    showToast('Matching deposits with receipts...', 'QuickBooks Matching');
+    const matchResults = performMatching(csvDeposits, allEnrichedReceipts);
 
     // Update sheet with results
     showToast('Updating spreadsheet...', 'QuickBooks Matching');
@@ -94,9 +104,9 @@ function parseCSVDeposits(data) {
     const amountStr = row[amountColIndex];
     const comment1 = row[comment1ColIndex];
 
-    // Parse amount
+    // Parse amount (allow negative amounts for refunds)
     const amount = parseCurrency(amountStr);
-    if (isNaN(amount) || amount <= 0) {
+    if (isNaN(amount)) {
       continue;
     }
 
@@ -106,6 +116,8 @@ function parseCSVDeposits(data) {
       Logger.log(`Row ${i + 1}: Could not extract email from "${comment1}"`);
       continue;
     }
+
+    Logger.log(`CSV Row ${i + 1}: Email=${email}, Amount=${amount}`);
 
     deposits.push({
       rowIndex: i,
@@ -144,48 +156,56 @@ function getDateRangeFromDeposits(deposits) {
 }
 
 /**
- * Enrich sales receipts with customer email data
+ * Enrich receipts (sales receipts or refund receipts) with customer email data
+ * @param {Array} receipts - Array of receipts (SalesReceipt or RefundReceipt objects)
+ * @param {Object} customerCache - Map of customer ID to customer object
+ * @param {string} txnType - Transaction type ('SalesReceipt' or 'RefundReceipt')
+ * @returns {Array} Enriched receipts with customer data and transaction type
  */
-function enrichSalesReceiptsWithCustomerData(salesReceipts, customerCache) {
+function enrichReceiptsWithCustomerData(receipts, customerCache, txnType) {
   const enriched = [];
 
-  salesReceipts.forEach(receipt => {
+  receipts.forEach(receipt => {
     const customerId = receipt.CustomerRef ? receipt.CustomerRef.value : null;
 
     if (!customerId) {
-      Logger.log(`Sales Receipt ${receipt.Id}: No customer reference`);
+      Logger.log(`${txnType} ${receipt.Id}: No customer reference`);
       return;
     }
 
     const customer = customerCache[customerId];
     if (!customer) {
-      Logger.log(`Sales Receipt ${receipt.Id}: Customer ${customerId} not found in cache`);
+      Logger.log(`${txnType} ${receipt.Id}: Customer ${customerId} not found in cache`);
       return;
     }
 
     const email = getCustomerEmail(customer);
     if (!email) {
-      Logger.log(`Sales Receipt ${receipt.Id}: Customer ${customerId} has no email`);
+      Logger.log(`${txnType} ${receipt.Id}: Customer ${customerId} has no email`);
       return;
     }
 
-    enriched.push({
+    const enrichedReceipt = {
       id: receipt.Id,
+      txnType: txnType,  // 'SalesReceipt' or 'RefundReceipt'
       txnDate: receipt.TxnDate,
       totalAmt: receipt.TotalAmt,
       customerName: receipt.CustomerRef.name,
       customerEmail: email,
       customerId: customerId,
       rawReceipt: receipt
-    });
+    };
+
+    Logger.log(`Enriched ${txnType}: ID=${enrichedReceipt.id}, Email=${enrichedReceipt.customerEmail}, Amount=${enrichedReceipt.totalAmt}`);
+    enriched.push(enrichedReceipt);
   });
 
-  logWithTimestamp(`Enriched ${enriched.length} sales receipts with customer data`);
+  logWithTimestamp(`Enriched ${enriched.length} ${txnType}s with customer data`);
   return enriched;
 }
 
 /**
- * Perform matching between CSV deposits and QB sales receipts
+ * Perform matching between CSV deposits and QB receipts
  */
 function performMatching(csvDeposits, qbReceipts) {
   const matched = [];
@@ -195,6 +215,8 @@ function performMatching(csvDeposits, qbReceipts) {
   csvDeposits.forEach(deposit => {
     let foundMatch = false;
 
+    Logger.log(`\n--- Matching CSV Row ${deposit.rowIndex + 1}: Email=${deposit.email}, Amount=${deposit.amount} ---`);
+
     for (let i = 0; i < qbOnly.length; i++) {
       const receipt = qbOnly[i];
 
@@ -202,7 +224,12 @@ function performMatching(csvDeposits, qbReceipts) {
       const emailMatch = deposit.email === receipt.customerEmail;
       const amountMatch = amountsMatch(deposit.amount, receipt.totalAmt);
 
+      Logger.log(`  Comparing with QB ${receipt.txnType} ${receipt.id}: Email=${receipt.customerEmail}, Amount=${receipt.totalAmt}`);
+      Logger.log(`    Email Match: ${emailMatch} (CSV: "${deposit.email}" vs QB: "${receipt.customerEmail}")`);
+      Logger.log(`    Amount Match: ${amountMatch} (CSV: ${deposit.amount} vs QB: ${receipt.totalAmt})`);
+
       if (emailMatch && amountMatch) {
+        Logger.log(`  ✓ MATCH FOUND!`);
         matched.push({
           csvData: deposit,
           qbData: receipt,
@@ -218,6 +245,7 @@ function performMatching(csvDeposits, qbReceipts) {
     }
 
     if (!foundMatch) {
+      Logger.log(`  ✗ No match found for this CSV row`);
       csvOnly.push({
         csvData: deposit,
         qbData: null,
@@ -271,17 +299,30 @@ function getMatchedDeposits() {
 
   const matchedDeposits = [];
 
-  // Find the QB Sales Receipt ID column
+  // Find the required columns
   const headers = data[0];
   let qbIdColIndex = -1;
+  let qbTypeColIndex = -1;
   let statusColIndex = -1;
 
   for (let i = 0; i < headers.length; i++) {
-    if (headers[i] === 'QB Sales Receipt ID') {
+    if (headers[i] === 'QB Transaction ID') {
       qbIdColIndex = i;
+    }
+    if (headers[i] === 'QB Transaction Type') {
+      qbTypeColIndex = i;
     }
     if (headers[i] === 'Match Status') {
       statusColIndex = i;
+    }
+  }
+
+  // Support legacy column name for backward compatibility
+  if (qbIdColIndex === -1) {
+    for (let i = 0; i < headers.length; i++) {
+      if (headers[i] === 'QB Sales Receipt ID') {
+        qbIdColIndex = i;
+      }
     }
   }
 
@@ -294,6 +335,7 @@ function getMatchedDeposits() {
     const row = data[i];
     const status = row[statusColIndex];
     const qbId = row[qbIdColIndex];
+    const qbType = qbTypeColIndex !== -1 ? row[qbTypeColIndex] : 'SalesReceipt';  // Default to SalesReceipt for backward compatibility
 
     if (status === '✓ Matched' && qbId) {
       const amount = parseCurrency(row[CONFIG.COLUMNS.AMOUNT]);
@@ -303,6 +345,7 @@ function getMatchedDeposits() {
         rowIndex: i,
         qbData: {
           Id: qbId,
+          txnType: qbType,  // 'SalesReceipt' or 'RefundReceipt'
           TotalAmt: amount
         }
       });
