@@ -1,0 +1,288 @@
+* QuickBooks CSV Comparison App - Design Requirements
+
+** Overview
+   - Use Google Apps Script to query QuickBooks Online API to match sales receipts in Quickbooks with deposits contained in a google sheet
+   - Store OAuth tokens in Properties Service (secure storage)
+   - Compare QuickBooks sales receipt data with deposits in Google Sheets
+   - Match deposits and sales receipts based on email address AND amount
+   - Color code matched deposit rows GREEN in the google spreadsheet
+   - List unmatched records for review
+   - Upon sucessful matching, utilize the Quickbooks API Create a deposit request of the matched sales receipts from the matched google sheet list
+
+** Technical Stack
+   - Google Apps Script (JavaScript-based)
+   - Google Sheets
+   - QuickBooks Online API v3
+   - OAuth 2.0 (managed in Apps Script)
+   - Properties Service (token storage)
+
+** No Server Required
+   - Everything runs in Google Cloud
+   - No home server configuration needed
+   - No domain or hosting costs
+
+** Setup Steps Required
+   1. User provides a google sheet and triggers the app script that runs the comparison tool
+   2. Create QuickBooks sandbox app (already done)
+   3. Configure OAuth redirect URI for Apps Script
+   4. Write Apps Script code
+   5. Authorize once (stores tokens automatically)
+   6. Run comparison script
+   7. Utilize quickbooks api to query sales receipts objects for matching
+   8. After running the matching script, create a Quickbase bank depost containing the matched transations using the Quickbooks API
+
+** Matching Logic
+
+*** Match Criteria (Both Must Be True)
+    A deposit row in the google sheet matches a QuickBooks sales receipt when:
+    1. **Email address matches**: Email extracted from CSV Comment1 column equals customer email in the QuickBooks sales receipt.
+    2. **Amount matches**: Deposit Amount in the google sheet equals QuickBooks sales receipt TotalAmt (within $0.01 tolerance)
+
+*** Email Extraction from google sheets
+    - Source: Comment1 column (column 11)
+    - Format: "Customer Name email@domain.com"
+    - Example: "Robert Poole andy@phreshpicks.com" → Extract: "andy@phreshpicks.com"
+    - Comparison: Case-insensitive
+
+*** Email Retrieval from QuickBooks
+    - QuickBooks sale receipt contains is Json format as shown below. May need to investigate the quickbooks api to get customer email
+    #+begin_src sales receipte.json 
+{
+  "SalesReceipt": {
+    "TxnDate": "2014-09-14", 
+    "domain": "QBO", 
+    "PrintStatus": "NotSet", 
+    "PaymentRefNum": "10264", 
+    "TotalAmt": 337.5, 
+    "Line": [
+      {
+        "Description": "Custom Design", 
+        "DetailType": "SalesItemLineDetail", 
+        "SalesItemLineDetail": {
+          "TaxCodeRef": {
+            "value": "NON"
+          }, 
+          "Qty": 4.5, 
+          "UnitPrice": 75, 
+          "ItemRef": {
+            "name": "Design", 
+            "value": "4"
+          }
+        }, 
+        "LineNum": 1, 
+        "Amount": 337.5, 
+        "Id": "1"
+      }, 
+      {
+        "DetailType": "SubTotalLineDetail", 
+        "Amount": 337.5, 
+        "SubTotalLineDetail": {}
+      }
+    ], 
+    "ApplyTaxAfterDiscount": false, 
+    "DocNumber": "1003", 
+    "sparse": false, 
+    "DepositToAccountRef": {
+      "name": "Checking", 
+      "value": "35"
+    }, 
+    "CustomerMemo": {
+      "value": "Thank you for your business and have a great day!"
+    }, 
+    "ProjectRef": {
+      "value": "39298243"
+    }, 
+    "Balance": 0, 
+    "CustomerRef": {
+      "name": "Dylan Sollfrank", 
+      "value": "6"
+    }, 
+    "TxnTaxDetail": {
+      "TotalTax": 0
+    }, 
+    "SyncToken": "0", 
+    "PaymentMethodRef": {
+      "name": "Check", 
+      "value": "2"
+    }, 
+    "EmailStatus": "NotSet", 
+    "BillAddr": {
+      "Lat": "INVALID", 
+      "Long": "INVALID", 
+      "Id": "49", 
+      "Line1": "Dylan Sollfrank"
+    }, 
+    "MetaData": {
+      "CreateTime": "2014-09-16T14:59:48-07:00", 
+      "LastUpdatedTime": "2014-09-16T14:59:48-07:00"
+    }, 
+    "CustomField": [
+      {
+        "DefinitionId": "1", 
+        "Type": "StringType", 
+        "Name": "Crew #"
+      }
+    ], 
+    "Id": "11"
+  }, 
+  "time": "2015-07-29T09:29:56.229-07:00"
+}
+
+    #+end_src
+    - Documentation regarding the quickbooks api for the sales receipt is located at this URL:https://developer.intuit.com/app/developer/qbo/docs/api/accounting/all-entities/salesreceipt 
+    
+*** Amount Matching
+    - CSV Amount format: "$189.10" (remove "$" and "," before comparing)
+    - QuickBooks TotalAmt format: 189.10 (decimal number)
+    - Tolerance: ±$0.01 to handle floating point precision
+
+** Visual Output
+
+*** Color Coding in Google Sheets
+    - **GREEN (#6AA84F)**: CSV row matched - both email AND amount found in QuickBooks
+    - **YELLOW (#F1C232)**: CSV row unmatched - transaction not found in QuickBooks
+    - **RED (#CC4125)**: QuickBooks deposit unmatched - deposit without corresponding CSV entry
+
+*** Additional Columns Added to CSV Sheet
+    - QB Sales receipt ID
+    - QB Sales receipt transaction Date
+    - QB Sales receipt TotalAmt
+    - QB Sales receipt Customer Email
+    - QB Sales receipt Customer Name
+    - Match Status ("✓ Matched", "⚠ In CSV only", "⚠ In QB only")
+
+** CSV File Specifications
+
+*** File Name Examples
+    The general pattern of the file name CSV is date (format: MONTH-DAY-YR) and transaction ID.  
+    File Name Examples:
+    - 1-17-26 3183
+    - 12-27-25 3651 
+ 
+*** Formatting Examples
+    #	Transaction Id	Time	Type	Tender Type	Account Number	Expires	Amount	Result Code	Response Msg	Comment1	Comment2
+    1	AW3A1B323FD4	1/16/2026 13:20	Sale	American Express	1566	26-Jan	$189.10	0	Approved	Robert Poole andy@phreshpicks.com	965919
+    2	AD3A1B358673	1/16/2026 15:10	Sale	American Express	1028	31-Jan	$823.50	0	Approved	Dean Chamberlain dean@shopthecanyon.com	965922
+
+*** Key Columns for Matching
+    - **Amount** (column 8): Dollar amount of transaction (e.g., "$189.10")
+    - **Comment1** (column 11): Contains customer name and email (e.g., "Robert Poole andy@phreshpicks.com")
+
+** QuickBooks API
+
+*** API Keys
+    - Provide notes for user directing him to store the API keys for CLIENT_ID AND CLIENT_SECRET.
+    - Access and refresh tokens shall be stored in google app script properties service. 
+
+*** Overview
+    - The QuickBooks API will need to be investigated. 
+      1. A list of sales receipts will need to be queried from the quickbooks API to compare against the google sheet deposit list.
+      2. Once all matches are confirmed, a quickbooks deposit will need to be created and submitted via the quickbooks api for the matched deposits from the matched list in google sheets.
+
+*** API Endpoints Required
+
+    1. QUERY a sales receipt
+       Request URL:GET /v3/company/<realmID>/query?query=<selectStatement>
+       Content type:application/text
+       Production Base URL:https://quickbooks.api.intuit.com
+       Sandbox Base URL:https://sandbox-quickbooks.api.intuit.com 
+       Sample query: select * from SalesReceipt where id='11'
+
+    2. READ a sales receipt
+       Request URL:GET /v3/company/<realmID>/salesreceipt/<salesreceiptId>
+       Production Base URL:https://quickbooks.api.intuit.com
+       Sandbox Base URL:https://sandbox-quickbooks.api.intuit.com 
+
+
+    3. CREATE a deposit
+       Request URL: POST /v3/company/<realmID>/deposit
+       Content type:application/json
+       Production Base URL:https://quickbooks.api.intuit.com
+       Sandbox Base URL:https://sandbox-quickbooks.api.intuit.com
+
+*** Deposit Sample Data Structure
+
+#+NAME: deposit-json
+#+begin_src json
+{
+  "Deposit": {
+    "SyncToken": "0", 
+    "domain": "QBO", 
+    "DepositToAccountRef": {
+      "name": "Checking", 
+      "value": "35"
+    }, 
+    "TxnDate": "2014-12-22", 
+    "TotalAmt": 1675.52, 
+    "sparse": false, 
+    "Line": [
+      {
+        "Amount": 1675, 
+        "LinkedTxn": [
+          {
+            "TxnLineId": "0", 
+            "TxnId": "120", 
+            "TxnType": "Payment"
+          }
+        ]
+      }
+    ], 
+    "Id": "148", 
+    "MetaData": {
+      "CreateTime": "2014-12-22T12:46:52-08:00", 
+      "LastUpdatedTime": "2014-12-22T12:46:52-08:00"
+    }
+  }, 
+  "time": "2014-12-22T13:39:35.449-08:00"
+}
+#+end_src
+
+** Performance Considerations
+    - Each sales receipt may require 2 additional API calls (Payment + Customer)
+    - Optimization: Cache all customers at start (1 query vs N queries)
+    - 100 deposits without caching: ~200 API calls (~100 seconds)
+    - 100 deposits with caching: ~101 API calls (~50 seconds)
+    - QuickBooks API rate limit: 500 requests per minute per company
+    - Google Apps Script timeout: 6 minutes per execution
+
+** Deployment Strategy
+
+*** Phase 1: Sandbox Development 
+    - Environment: Sandbox
+    - Data: Test/fake data
+    - Goal: Build and test functionality
+    - Risk: None (isolated environment)
+
+*** Phase 2: Production Testing 
+    - Environment: Production
+    - Data: Real data (limited date range)
+    - Goal: Verify accuracy with real data
+    - Risk: Low (read-only operations)
+
+*** Phase 3: Production Use 
+    - Environment: Production
+    - Data: Real data (full use)
+    - Goal: Regular reconciliation operations
+    - Risk: Minimal (read-only, manual review)
+
+** Success Criteria
+    - Correctly extract email from CSV Comment1 field
+    - Retrieve customer email from QuickBooks via Sales Receipt → Customer
+    - Match deposits when BOTH email AND amount match
+    - Color matched CSV rows GREEN
+    - Color unmatched CSV rows YELLOW
+    - Color unmatched QB deposits RED
+    - Generate summary statistics (matched count, unmatched count)
+    - Complete execution within 6-minute timeout
+ 
+** Limitations
+    - Cannot modify QuickBooks data (read-only access)
+    - Cannot set UI checkmarks in QuickBooks interface
+    - Limited to 1000 deposits per query
+    - Refresh token expires every 100 days (requires re-authorization)
+
+** Deliverables
+    1. Google Apps Script code
+    2. Setup instructions
+    3. User guide
+
