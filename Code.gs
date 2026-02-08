@@ -44,10 +44,16 @@ function onOpen() {
       .addItem('Clear Match Data', 'clearMatchData')
       .addItem('Format Sheet', 'formatSheet')
       .addSeparator()
-      .addItem('🔧 Debug Sales Receipt', 'debugSalesReceipt')
-      .addItem('🔧 Debug List All Accounts', 'debugListAllAccounts')
-      .addItem('🔧 Test Simple Deposit', 'testSimpleDepositWithoutLink')
-      .addItem('🔧 Test Linked Deposit', 'testLinkedDeposit')
+      .addSubMenu(ui.createMenu('Debug')
+        .addItem('🔍 Production Receipt Structure', 'debugProductionReceiptStructure')
+        .addItem('🔍 Single Receipt Structure', 'debugSingleProductionReceipt')
+        .addSeparator()
+        .addItem('🧪 Test Individual Deposits', 'testIndividualDeposits')
+        .addSeparator()
+        .addItem('🔧 Debug Sales Receipt', 'debugSalesReceipt')
+        .addItem('🔧 Debug List All Accounts', 'debugListAllAccounts')
+        .addItem('🔧 Test Simple Deposit', 'testSimpleDepositWithoutLink')
+        .addItem('🔧 Test Linked Deposit', 'testLinkedDeposit'))
       .addToUi();
   } catch (error) {
     Logger.log('Error in onOpen: ' + error.toString());
@@ -66,8 +72,14 @@ function onOpen() {
           .addItem('3. Test Connection', 'testQuickBooksConnection')
           .addItem('4. Select Deposit Account', 'selectDepositAccount'))
         .addSeparator()
-        .addItem('🔧 Debug List All Accounts', 'debugListAllAccounts')
-        .addItem('🔧 Test Linked Deposit', 'testLinkedDeposit')
+        .addSubMenu(ui.createMenu('Debug')
+          .addItem('🔍 Production Receipt Structure', 'debugProductionReceiptStructure')
+          .addItem('🔍 Single Receipt Structure', 'debugSingleProductionReceipt')
+          .addSeparator()
+          .addItem('🧪 Test Individual Deposits', 'testIndividualDeposits')
+          .addSeparator()
+          .addItem('🔧 Debug List All Accounts', 'debugListAllAccounts')
+          .addItem('🔧 Test Linked Deposit', 'testLinkedDeposit'))
         .addToUi();
     } catch (e) {
       // Silently fail - Apps Script will show error in execution log

@@ -173,30 +173,58 @@ function enrichReceiptsWithCustomerData(receipts, customerCache, txnType) {
       return;
     }
 
-    const customer = customerCache[customerId];
-    if (!customer) {
-      Logger.log(`${txnType} ${receipt.Id}: Customer ${customerId} not found in cache`);
-      return;
+    // PRIORITY 1: Check PrivateNote field first (primary source in production)
+    let email = null;
+    if (receipt.PrivateNote) {
+      const extractedEmail = extractEmail(receipt.PrivateNote);
+      if (extractedEmail) {
+        email = extractedEmail;
+        Logger.log(`${txnType} ${receipt.Id}: Email extracted from PrivateNote: ${email}`);
+      }
     }
 
-    const email = getCustomerEmail(customer);
-    if (!email) {
-      Logger.log(`${txnType} ${receipt.Id}: Customer ${customerId} has no email`);
-      return;
+    // PRIORITY 2: Fallback to BillEmail field if PrivateNote doesn't have email
+    if (!email && receipt.BillEmail && receipt.BillEmail.Address) {
+      email = receipt.BillEmail.Address.toLowerCase();
+      Logger.log(`${txnType} ${receipt.Id}: Email found in BillEmail.Address: ${email}`);
     }
+
+    // PRIORITY 3: Final fallback to customer lookup (for sandbox or older data)
+    if (!email) {
+      const customer = customerCache[customerId];
+      if (!customer) {
+        Logger.log(`${txnType} ${receipt.Id}: Customer ${customerId} not found in cache, skipping`);
+        return;
+      }
+
+      email = getCustomerEmail(customer);
+      if (!email) {
+        Logger.log(`${txnType} ${receipt.Id}: Customer ${customerId} has no email anywhere, skipping`);
+        return;
+      }
+      Logger.log(`${txnType} ${receipt.Id}: Email found via customer lookup: ${email}`);
+    }
+
+    // Check deposit status
+    const depositAccountRef = receipt.DepositToAccountRef || null;
+    const depositAccountName = depositAccountRef ? depositAccountRef.name : 'Unknown';
+    const isInUndepositedFunds = depositAccountName.toLowerCase().includes('undeposited funds');
 
     const enrichedReceipt = {
       id: receipt.Id,
-      txnType: txnType,  // 'SalesReceipt' or 'RefundReceipt'
+      txnType: txnType,  // Keep original QB entity type
       txnDate: receipt.TxnDate,
       totalAmt: receipt.TotalAmt,
       customerName: receipt.CustomerRef.name,
       customerEmail: email,
       customerId: customerId,
+      depositAccountRef: depositAccountRef,
+      depositAccountName: depositAccountName,
+      isInUndepositedFunds: isInUndepositedFunds,
       rawReceipt: receipt
     };
 
-    Logger.log(`Enriched ${txnType}: ID=${enrichedReceipt.id}, Email=${enrichedReceipt.customerEmail}, Amount=${enrichedReceipt.totalAmt}`);
+    Logger.log(`Enriched ${txnType}: ID=${enrichedReceipt.id}, Email=${enrichedReceipt.customerEmail}, Amount=${enrichedReceipt.totalAmt}, DepositTo=${depositAccountName}`);
     enriched.push(enrichedReceipt);
   });
 
@@ -215,10 +243,21 @@ function performMatching(csvDeposits, qbReceipts) {
   csvDeposits.forEach(deposit => {
     let foundMatch = false;
 
+    // OPTIMIZATION: Only search receipts with matching transaction type based on amount sign
+    // Negative CSV amount → search RefundReceipts only
+    // Positive CSV amount → search SalesReceipts only
+    const expectedTxnType = deposit.amount < 0 ? 'RefundReceipt' : 'SalesReceipt';
+
     Logger.log(`\n--- Matching CSV Row ${deposit.rowIndex + 1}: Email=${deposit.email}, Amount=${deposit.amount} ---`);
+    Logger.log(`  Expected transaction type: ${expectedTxnType} (based on amount sign)`);
 
     for (let i = 0; i < qbOnly.length; i++) {
       const receipt = qbOnly[i];
+
+      // OPTIMIZATION: Skip receipts that don't match the expected type
+      if (receipt.txnType !== expectedTxnType) {
+        continue;  // Skip this receipt without logging
+      }
 
       // Check if email and amount match
       const emailMatch = deposit.email === receipt.customerEmail;
@@ -230,10 +269,12 @@ function performMatching(csvDeposits, qbReceipts) {
 
       if (emailMatch && amountMatch) {
         Logger.log(`  ✓ MATCH FOUND!`);
+
         matched.push({
           csvData: deposit,
           qbData: receipt,
-          status: '✓ Matched'
+          status: '✓ Matched',
+          isInvalid: false  // Can't be invalid since we only matched correct types
         });
 
         // Remove from qbOnly array
@@ -291,6 +332,77 @@ function generateMatchSummary(matchResults) {
 }
 
 /**
+ * Validate that receipts can be deposited (not already deposited)
+ * @param {Array} matchedDeposits - Array of matched deposits to validate
+ * @returns {Object} Validation result with depositable and alreadyDeposited arrays
+ */
+function validateReceiptsForDeposit(matchedDeposits) {
+  const depositable = [];
+  const alreadyDeposited = [];
+  const invalidAmount = [];
+  const unknown = [];
+
+  matchedDeposits.forEach(deposit => {
+    const qbData = deposit.qbData;
+
+    // VALIDATION 1: Check for invalid amount/type combinations
+    // Based on CSV Amount vs QB Transaction Type
+    // SalesReceipts should have positive CSV amounts, RefundReceipts should have negative CSV amounts
+    const csvAmount = deposit.csvAmount || qbData.TotalAmt;  // Fall back to QB amount if CSV amount not available
+    const txnType = qbData.txnType;
+
+    if ((txnType === 'SalesReceipt' && csvAmount < 0) ||
+        (txnType === 'RefundReceipt' && csvAmount > 0)) {
+      const reason = txnType === 'SalesReceipt'
+        ? `SalesReceipt cannot have negative amount: $${csvAmount}`
+        : `RefundReceipt cannot have positive amount: $${csvAmount}`;
+      invalidAmount.push({
+        ...deposit,
+        invalidReason: reason
+      });
+      Logger.log(`${txnType} ${qbData.Id}: INVALID - ${reason}`);
+      return;  // Skip this receipt
+    }
+
+    // VALIDATION 2: Check if receipt is in Undeposited Funds
+    const rawReceipt = qbData.rawReceipt || qbData;
+    const depositAccountRef = rawReceipt.DepositToAccountRef || rawReceipt.depositAccountRef;
+    const depositAccountName = depositAccountRef ? depositAccountRef.name : '';
+
+    if (!depositAccountName) {
+      // No deposit account info - can't determine status
+      Logger.log(`Warning: ${qbData.txnType} ${qbData.Id} has no DepositToAccountRef - assuming depositable`);
+      unknown.push(deposit);
+      depositable.push(deposit);  // Include in depositable for now
+      return;
+    }
+
+    const isInUndepositedFunds = depositAccountName.toLowerCase().includes('undeposited funds');
+
+    if (isInUndepositedFunds) {
+      depositable.push(deposit);
+      Logger.log(`${qbData.txnType} ${qbData.Id}: In Undeposited Funds - DEPOSITABLE`);
+    } else {
+      alreadyDeposited.push({
+        ...deposit,
+        currentDepositAccount: depositAccountName
+      });
+      Logger.log(`${qbData.txnType} ${qbData.Id}: Already in ${depositAccountName} - ALREADY DEPOSITED`);
+    }
+  });
+
+  logWithTimestamp(`Validation: ${depositable.length} depositable, ${alreadyDeposited.length} already deposited, ${invalidAmount.length} invalid amounts, ${unknown.length} unknown`);
+
+  return {
+    depositable: depositable,
+    alreadyDeposited: alreadyDeposited,
+    invalidAmount: invalidAmount,
+    unknown: unknown,
+    canProceed: alreadyDeposited.length === 0 && invalidAmount.length === 0
+  };
+}
+
+/**
  * Get matched deposits ready for deposit creation
  */
 function getMatchedDeposits() {
@@ -341,14 +453,59 @@ function getMatchedDeposits() {
       const amount = parseCurrency(row[CONFIG.COLUMNS.AMOUNT]);
       const email = extractEmail(row[CONFIG.COLUMNS.COMMENT1]);
 
-      matchedDeposits.push({
-        rowIndex: i,
-        qbData: {
-          Id: qbId,
-          txnType: qbType,  // 'SalesReceipt' or 'RefundReceipt'
-          TotalAmt: amount
+      // Re-query the receipt to get current deposit status
+      try {
+        let rawReceipt = null;
+        if (qbType === 'RefundReceipt') {
+          const query = `SELECT * FROM RefundReceipt WHERE Id = '${qbId}'`;
+          const receipts = queryRefundReceipts(query);
+          rawReceipt = receipts.length > 0 ? receipts[0] : null;
+        } else {
+          // Default to SalesReceipt
+          const query = `SELECT * FROM SalesReceipt WHERE Id = '${qbId}'`;
+          const receipts = querySalesReceipts(query);
+          rawReceipt = receipts.length > 0 ? receipts[0] : null;
         }
-      });
+
+        if (rawReceipt) {
+          matchedDeposits.push({
+            rowIndex: i,
+            csvAmount: amount,  // Include CSV amount for validation
+            qbData: {
+              Id: qbId,
+              txnType: qbType,
+              TotalAmt: amount,
+              rawReceipt: rawReceipt,  // Include full receipt data for validation
+              DepositToAccountRef: rawReceipt.DepositToAccountRef,
+              depositAccountRef: rawReceipt.DepositToAccountRef
+            }
+          });
+        } else {
+          Logger.log(`Warning: Could not re-query ${qbType} ${qbId}`);
+          // Add without rawReceipt - validation will handle it
+          matchedDeposits.push({
+            rowIndex: i,
+            csvAmount: amount,  // Include CSV amount for validation
+            qbData: {
+              Id: qbId,
+              txnType: qbType,
+              TotalAmt: amount
+            }
+          });
+        }
+      } catch (error) {
+        Logger.log(`Error re-querying ${qbType} ${qbId}: ${error.toString()}`);
+        // Add without rawReceipt
+        matchedDeposits.push({
+          rowIndex: i,
+          csvAmount: amount,  // Include CSV amount for validation
+          qbData: {
+            Id: qbId,
+            txnType: qbType,
+            TotalAmt: amount
+          }
+        });
+      }
     }
   }
 

@@ -27,6 +27,7 @@ const CONFIG = {
     MATCHED: '#6AA84F',        // Green - matched in both CSV and QB
     CSV_ONLY: '#F1C232',       // Yellow - in CSV only
     QB_ONLY: '#CC4125',        // Red - in QB only
+    INVALID: '#E06666',        // Light Red - invalid amount/type combination
     HEADER: '#4A86E8'          // Blue - header row
   },
 

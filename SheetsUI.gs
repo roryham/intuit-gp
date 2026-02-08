@@ -98,7 +98,7 @@ function updateRowWithMatchData(sheet, match, colIndices, matchType) {
     sheet.getRange(rowNum, colIndices.qbName + 1).setValue(match.qbData.customerName);
     sheet.getRange(rowNum, colIndices.status + 1).setValue(match.status);
 
-    // Color code row GREEN
+    // Color code row GREEN (all matches are valid due to optimized matching)
     const rowRange = sheet.getRange(rowNum, 1, 1, sheet.getLastColumn());
     rowRange.setBackground(CONFIG.COLORS.MATCHED);
 
@@ -208,6 +208,73 @@ function showDepositCreationDialog() {
         'Account Not Configured'
       );
       return;
+    }
+
+    // VALIDATE: Check if any receipts have already been deposited
+    const validation = validateReceiptsForDeposit(matchedDeposits);
+
+    if (!validation.canProceed) {
+      // Some receipts have issues - build alert message
+      let alertMessage = `⚠ WARNING: Some receipts cannot be deposited!\n\n`;
+
+      // Show invalid amount receipts
+      if (validation.invalidAmount.length > 0) {
+        alertMessage += `Invalid Amount/Type (${validation.invalidAmount.length}):\n`;
+        validation.invalidAmount.forEach((deposit, index) => {
+          if (index < 5) {  // Show first 5
+            const qbData = deposit.qbData;
+            alertMessage += `  • ${qbData.txnType} ${qbData.Id}: $${qbData.TotalAmt} - ${deposit.invalidReason}\n`;
+          }
+        });
+        if (validation.invalidAmount.length > 5) {
+          alertMessage += `  ... and ${validation.invalidAmount.length - 5} more\n`;
+        }
+        alertMessage += `\n`;
+      }
+
+      // Show already deposited receipts
+      if (validation.alreadyDeposited.length > 0) {
+        alertMessage += `Already Deposited (${validation.alreadyDeposited.length}):\n`;
+        validation.alreadyDeposited.forEach((deposit, index) => {
+          if (index < 5) {  // Show first 5
+            const qbData = deposit.qbData;
+            alertMessage += `  • ${qbData.txnType} ${qbData.Id}: $${qbData.TotalAmt} → ${deposit.currentDepositAccount}\n`;
+          }
+        });
+        if (validation.alreadyDeposited.length > 5) {
+          alertMessage += `  ... and ${validation.alreadyDeposited.length - 5} more\n`;
+        }
+        alertMessage += `\n`;
+      }
+
+      alertMessage += `Depositable (${validation.depositable.length}): Valid and ready to deposit\n\n`;
+
+      if (validation.invalidAmount.length > 0) {
+        alertMessage += `Note: Invalid combinations detected (mismatched amount sign vs transaction type).\n`;
+        alertMessage += `This may indicate manual edits to the sheet after matching.\n\n`;
+      }
+
+      if (validation.alreadyDeposited.length > 0) {
+        alertMessage += `Already deposited receipts have been applied to deposits in QuickBooks.\n\n`;
+      }
+
+      alertMessage += `Would you like to proceed with the ${validation.depositable.length} depositable receipt(s)?`;
+
+      const proceed = showConfirmation(alertMessage, 'Deposit Validation');
+
+      if (!proceed) {
+        return;  // User cancelled
+      }
+
+      // Continue with only depositable receipts
+      if (validation.depositable.length === 0) {
+        showAlert('No depositable receipts remaining.', 'Cannot Create Deposit');
+        return;
+      }
+
+      // Update matchedDeposits to only include depositable ones
+      matchedDeposits.length = 0;  // Clear array
+      matchedDeposits.push(...validation.depositable);  // Add depositable ones
     }
 
     const totalAmount = matchedDeposits.reduce((sum, deposit) => {
